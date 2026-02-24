@@ -1,0 +1,5 @@
+{
+  "name": "Communication Radiologie",
+  "description": "Une application de communication en temps réel pour les salles de radiologie, connectant le personnel et les patients.",
+  "requestFramePermissions": []
+}
