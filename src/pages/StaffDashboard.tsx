@@ -1,32 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { Socket } from 'socket.io-client';
-import { Settings, Plus, Power, Wifi, WifiOff, X, Image as ImageIcon, Video, Edit2, Trash2, ChevronDown, ChevronUp, Play, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Settings, Plus, Power, Wifi, WifiOff, X, Image as ImageIcon, Video, Edit2, Trash2, ChevronLeft, ChevronRight, Play, Link as LinkIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-
-interface Scenario {
-  id: string;
-  name: string;
-}
-
-interface Instruction {
-  id: string;
-  scenario_id: string;
-  name: string;
-  media_url: string | null;
-  media_type: string | null;
-  bg_color: string;
-}
+import Peer, { DataConnection } from 'peerjs';
+import { db, Scenario, Instruction } from '../lib/db';
 
 interface Props {
-  socket: Socket | null;
   onBack: () => void;
 }
 
-export default function StaffDashboard({ socket, onBack }: Props) {
+export default function StaffDashboard({ onBack }: Props) {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [instructionsByScenario, setInstructionsByScenario] = useState<Record<string, Instruction[]>>({});
   
+  // PeerJS state
+  const [patientCode, setPatientCode] = useState('');
+  const [isConnecting, setIsConnecting] = useState(false);
   const [patientConnected, setPatientConnected] = useState(false);
+  const peerRef = useRef<Peer | null>(null);
+  const connRef = useRef<DataConnection | null>(null);
   
   // View state
   const [viewMode, setViewMode] = useState<'list' | 'session' | 'edit'>('list');
@@ -46,40 +37,75 @@ export default function StaffDashboard({ socket, onBack }: Props) {
 
   useEffect(() => {
     fetchScenarios();
-
-    if (socket) {
-      socket.on('patient_status', (data) => {
-        setPatientConnected(data.connected);
-      });
-
-      socket.on('scenarios_updated', () => {
-        fetchScenarios();
-      });
-
-      socket.on('instructions_updated', () => {
-        fetchScenarios(); // Re-fetch everything to keep it simple
-      });
-    }
+    
+    // Initialize PeerJS for the staff
+    const peer = new Peer();
+    peerRef.current = peer;
 
     return () => {
-      if (socket) {
-        socket.off('patient_status');
-        socket.off('scenarios_updated');
-        socket.off('instructions_updated');
-      }
+      peer.destroy();
     };
-  }, [socket]);
+  }, []);
+
+  const connectToPatient = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!patientCode || !peerRef.current) return;
+    
+    setIsConnecting(true);
+    const fullId = `radio-patient-${patientCode}`;
+    const conn = peerRef.current.connect(fullId);
+    
+    conn.on('open', () => {
+      connRef.current = conn;
+      setPatientConnected(true);
+      setIsConnecting(false);
+    });
+
+    conn.on('close', () => {
+      setPatientConnected(false);
+      connRef.current = null;
+    });
+
+    conn.on('error', () => {
+      setIsConnecting(false);
+      alert('Erreur de connexion. Vérifiez le code.');
+    });
+  };
+
+  const sendInstruction = async (inst: Instruction) => {
+    if (connRef.current && patientConnected) {
+      // We need to convert Blob to ArrayBuffer to send over PeerJS reliably
+      let mediaBuffer = null;
+      if (inst.media) {
+        mediaBuffer = await inst.media.arrayBuffer();
+      }
+      
+      connRef.current.send({
+        type: 'instruction',
+        payload: {
+          id: inst.id,
+          name: inst.name,
+          media: mediaBuffer,
+          media_type: inst.media_type,
+          bg_color: inst.bg_color
+        }
+      });
+    }
+  };
+
+  const clearInstruction = () => {
+    if (connRef.current && patientConnected) {
+      connRef.current.send({ type: 'clear' });
+    }
+  };
 
   const fetchScenarios = async () => {
-    const res = await fetch('/api/scenarios');
-    const data: Scenario[] = await res.json();
+    const data = await db.getScenarios();
     setScenarios(data);
     
-    // Fetch instructions for all scenarios
     const instMap: Record<string, Instruction[]> = {};
     for (const scenario of data) {
-      const instRes = await fetch(`/api/scenarios/${scenario.id}/instructions`);
-      instMap[scenario.id] = await instRes.json();
+      instMap[scenario.id] = await db.getInstructions(scenario.id);
     }
     setInstructionsByScenario(instMap);
   };
@@ -91,7 +117,7 @@ export default function StaffDashboard({ socket, onBack }: Props) {
     
     const instructions = instructionsByScenario[scenarioId] || [];
     if (instructions.length > 0) {
-      socket?.emit('send_instruction', instructions[0]);
+      sendInstruction(instructions[0]);
     }
   };
 
@@ -99,7 +125,7 @@ export default function StaffDashboard({ socket, onBack }: Props) {
     setActiveScenarioId(null);
     setCurrentStepIndex(0);
     setViewMode('list');
-    socket?.emit('clear_instruction');
+    clearInstruction();
   };
 
   const goToStep = (index: number) => {
@@ -107,22 +133,17 @@ export default function StaffDashboard({ socket, onBack }: Props) {
     const instructions = instructionsByScenario[activeScenarioId] || [];
     if (index >= 0 && index < instructions.length) {
       setCurrentStepIndex(index);
-      socket?.emit('send_instruction', instructions[index]);
+      sendInstruction(instructions[index]);
     }
   };
 
   const handleCreateScenario = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    const res = await fetch('/api/scenarios', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: formData.get('name'),
-        stepsCount: formData.get('stepsCount'),
-      }),
-    });
-    await res.json();
+    const name = formData.get('name') as string;
+    const stepsCount = parseInt(formData.get('stepsCount') as string, 10);
+    
+    await db.createScenario(name, stepsCount);
     setShowNewScenario(false);
     fetchScenarios();
   };
@@ -133,7 +154,7 @@ export default function StaffDashboard({ socket, onBack }: Props) {
 
   const confirmDeleteScenario = async () => {
     if (!scenarioToDelete) return;
-    await fetch(`/api/scenarios/${scenarioToDelete}`, { method: 'DELETE' });
+    await db.deleteScenario(scenarioToDelete);
     if (editingScenarioId === scenarioToDelete) {
       setEditingScenarioId(null);
       setViewMode('list');
@@ -145,29 +166,26 @@ export default function StaffDashboard({ socket, onBack }: Props) {
   const handleSaveInstruction = async (e: React.FormEvent<HTMLFormElement>, instructionId?: string, scenarioId?: string) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const name = formData.get('name') as string;
+    const removeMedia = formData.get('remove_media') === 'true';
+    const file = formData.get('media') as File;
     
     if (instructionId) {
-      await fetch(`/api/instructions/${instructionId}`, {
-        method: 'PUT',
-        body: formData,
-      });
+      const updateData: Partial<Instruction> = { name };
+      if (removeMedia) {
+        updateData.media = null;
+        updateData.media_type = null;
+      } else if (file && file.size > 0) {
+        updateData.media = file;
+        updateData.media_type = file.type;
+      }
+      await db.updateInstruction(instructionId, updateData);
     } else if (scenarioId) {
-      const res = await fetch(`/api/scenarios/${scenarioId}/instructions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formData.get('name'),
-          bg_color: 'bg-slate-900', // Default dark theme for patient
-        }),
-      });
-      const newInst = await res.json();
-      const file = formData.get('media') as File;
+      const newInst = await db.createInstruction(scenarioId, name);
       if (file && file.size > 0) {
-        const updateData = new FormData();
-        updateData.append('media', file);
-        await fetch(`/api/instructions/${newInst.id}`, {
-          method: 'PUT',
-          body: updateData,
+        await db.updateInstruction(newInst.id, {
+          media: file,
+          media_type: file.type
         });
       }
     }
@@ -181,7 +199,7 @@ export default function StaffDashboard({ socket, onBack }: Props) {
 
   const confirmDeleteInstruction = async () => {
     if (!instructionToDelete) return;
-    await fetch(`/api/instructions/${instructionToDelete}`, { method: 'DELETE' });
+    await db.deleteInstruction(instructionToDelete);
     setInstructionToDelete(null);
     fetchScenarios();
   };
@@ -211,9 +229,9 @@ export default function StaffDashboard({ socket, onBack }: Props) {
           <h2 className="text-4xl md:text-5xl font-semibold text-slate-900 leading-tight">
             {currentInst?.name || `Étape ${currentStepIndex + 1}`}
           </h2>
-          {currentInst?.media_url && (
+          {currentInst?.media && (
             <div className="mt-8 px-4 py-2 bg-slate-50 rounded-full text-sm text-slate-500 flex items-center gap-2">
-              {currentInst.media_type === 'video' ? <Video size={16} /> : <ImageIcon size={16} />}
+              {currentInst.media_type?.startsWith('video/') ? <Video size={16} /> : <ImageIcon size={16} />}
               Média affiché
             </div>
           )}
@@ -247,14 +265,7 @@ export default function StaffDashboard({ socket, onBack }: Props) {
     const instructions = instructionsByScenario[editingScenarioId] || [];
 
     const appendNewStep = async () => {
-      await fetch(`/api/scenarios/${editingScenarioId}/instructions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: `Étape ${instructions.length + 1}`,
-          bg_color: 'bg-slate-900',
-        }),
-      });
+      await db.createInstruction(editingScenarioId, `Étape ${instructions.length + 1}`);
       fetchScenarios();
     };
 
@@ -288,9 +299,9 @@ export default function StaffDashboard({ socket, onBack }: Props) {
                 />
                 <div className="flex items-center justify-between pt-4 border-t border-slate-50">
                   <div className="flex-1">
-                    {inst.media_url ? (
+                    {inst.media ? (
                       <div className="flex items-center gap-2 text-sm text-blue-600">
-                        {inst.media_type === 'video' ? <Video size={16} /> : <ImageIcon size={16} />}
+                        {inst.media_type?.startsWith('video/') ? <Video size={16} /> : <ImageIcon size={16} />}
                         Média attaché
                         <label className="ml-4 flex items-center gap-1 text-rose-500 cursor-pointer">
                           <input type="checkbox" name="remove_media" value="true" className="rounded" />
@@ -400,18 +411,44 @@ export default function StaffDashboard({ socket, onBack }: Props) {
   // Render List View
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      <header className="bg-white px-6 py-4 flex items-center justify-between border-b border-slate-200 sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-2 -ml-2 hover:bg-slate-100 rounded-full transition-colors">
-            <Power size={20} className="text-slate-500" />
-          </button>
-          <h1 className="text-lg font-semibold text-slate-900">Scénarios</h1>
+      <header className="bg-white px-6 py-4 flex flex-col gap-4 border-b border-slate-200 sticky top-0 z-10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={onBack} className="p-2 -ml-2 hover:bg-slate-100 rounded-full transition-colors">
+              <Power size={20} className="text-slate-500" />
+            </button>
+            <h1 className="text-lg font-semibold text-slate-900">Scénarios</h1>
+          </div>
+          
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${patientConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+            {patientConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
+            {patientConnected ? 'Connecté' : 'Déconnecté'}
+          </div>
         </div>
-        
-        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${patientConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-          {patientConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
-          {patientConnected ? 'Connecté' : 'Déconnecté'}
-        </div>
+
+        {!patientConnected && (
+          <form onSubmit={connectToPatient} className="flex gap-2">
+            <div className="relative flex-1">
+              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                <LinkIcon size={16} className="text-slate-400" />
+              </div>
+              <input
+                type="text"
+                value={patientCode}
+                onChange={(e) => setPatientCode(e.target.value)}
+                placeholder="Code de l'écran patient"
+                className="w-full pl-10 pr-4 py-2 bg-slate-100 border-transparent rounded-xl focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+              />
+            </div>
+            <button 
+              type="submit"
+              disabled={!patientCode || isConnecting}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-medium transition-colors"
+            >
+              {isConnecting ? '...' : 'Lier'}
+            </button>
+          </form>
+        )}
       </header>
 
       <main className="flex-1 p-4 space-y-4">
@@ -466,7 +503,7 @@ export default function StaffDashboard({ socket, onBack }: Props) {
                             {idx + 1}
                           </div>
                           <span className="text-sm font-medium truncate">{inst.name}</span>
-                          {inst.media_url && <ImageIcon size={14} className="text-slate-400 shrink-0" />}
+                          {inst.media && <ImageIcon size={14} className="text-slate-400 shrink-0" />}
                         </div>
                       ))}
                       <div className="pt-4 mt-2 border-t border-slate-200 flex justify-end">
