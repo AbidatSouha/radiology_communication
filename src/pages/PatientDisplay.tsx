@@ -90,29 +90,37 @@ export default function PatientDisplay({ socket, onBack }: Props) {
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
             className="flex-1 flex flex-col items-center justify-center p-12 bg-slate-900"
           >
-            {instruction.media_url && (
-              <motion.div 
+            {instruction.media_url && instruction.media_type === 'video' && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
+                className="absolute inset-0"
+              >
+                <video
+                  src={instruction.media_url}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-black/25" />
+              </motion.div>
+            )}
+
+            {instruction.media_url && instruction.media_type !== 'video' && (
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3, duration: 0.8 }}
-                className="mb-12 max-w-4xl w-full aspect-video rounded-3xl overflow-hidden shadow-2xl bg-black/40 backdrop-blur-sm border border-white/10"
+                className="mb-12 max-w-4xl w-full aspect-video rounded-3xl overflow-hidden shadow-2xl bg-black/40 backdrop-blur-sm border border-white/10 relative z-10"
               >
-                {instruction.media_type === 'video' ? (
-                  <video 
-                    src={instruction.media_url} 
-                    autoPlay 
-                    loop 
-                    muted 
-                    playsInline
-                    className="w-full h-full object-contain"
-                  />
-                ) : (
-                  <img 
-                    src={instruction.media_url} 
-                    alt={instruction.name}
-                    className="w-full h-full object-contain"
-                  />
-                )}
+                <img
+                  src={instruction.media_url}
+                  alt={instruction.name}
+                  className="w-full h-full object-contain"
+                />
               </motion.div>
             )}
             
@@ -122,7 +130,7 @@ export default function PatientDisplay({ socket, onBack }: Props) {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1, duration: 0.8 }}
-                className="text-5xl md:text-7xl lg:text-8xl font-semibold text-white text-center leading-tight tracking-tight drop-shadow-lg"
+                className="text-5xl md:text-7xl lg:text-8xl font-semibold text-white text-center leading-tight tracking-tight drop-shadow-lg relative z-10"
               >
                 {instruction.name}
               </motion.h1>

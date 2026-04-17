@@ -9,7 +9,7 @@ export default function RoleSelection({ onSelect }: Props) {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/50 flex flex-col items-center p-6 font-sans">
       <div className="w-full max-w-md pt-8 pb-12">
         <h1 className="text-sm font-bold text-blue-600/80 uppercase tracking-widest text-center">
-          Communication Radiologique
+          SignBridge LT
         </h1>
       </div>
 

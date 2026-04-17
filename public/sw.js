@@ -1,5 +1,5 @@
 const CACHE_NAME = 'communication-radiologie-v1';
-const APP_SHELL = ['/', '/index.html', '/manifest.json'];
+const APP_SHELL = ['/', '/index.html', '/manifest.json', '/signbridge-logo.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
