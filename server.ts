@@ -145,9 +145,21 @@ app.put('/api/instructions/:id', upload.single('media'), (req, res) => {
   const { id } = req.params;
   const { name, bg_color } = req.body;
   const file = req.file;
+  const current = db.prepare('SELECT * FROM instructions WHERE id = ?').get(id) as
+    | { name: string; bg_color: string }
+    | undefined;
+
+  if (!current) {
+    res.status(404).json({ error: 'Instruction not found' });
+    return;
+  }
+
+  const nextName = typeof name === 'string' && name.trim() ? name.trim() : current.name;
+  const nextBgColor =
+    typeof bg_color === 'string' && bg_color.trim() ? bg_color.trim() : current.bg_color;
   
   let updateQuery = 'UPDATE instructions SET name = ?, bg_color = ?';
-  const params: any[] = [name, bg_color];
+  const params: any[] = [nextName, nextBgColor];
   
   if (file) {
     const media_url = `/uploads/${file.filename}`;

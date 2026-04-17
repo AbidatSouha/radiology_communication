@@ -147,10 +147,14 @@ export default function StaffDashboard({ socket, onBack }: Props) {
     const formData = new FormData(e.currentTarget);
     
     if (instructionId) {
-      await fetch(`/api/instructions/${instructionId}`, {
+      const res = await fetch(`/api/instructions/${instructionId}`, {
         method: 'PUT',
         body: formData,
       });
+      if (!res.ok) {
+        alert("La sauvegarde a echoue. Veuillez reessayer.");
+        return;
+      }
     } else if (scenarioId) {
       const res = await fetch(`/api/scenarios/${scenarioId}/instructions`, {
         method: 'POST',
@@ -307,7 +311,7 @@ export default function StaffDashboard({ socket, onBack }: Props) {
                     )}
                   </div>
                   <button type="submit" className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-full">
-                    Sauver
+                    Sauvegarder
                   </button>
                 </div>
               </form>
