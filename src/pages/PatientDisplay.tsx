@@ -1,76 +1,44 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { Socket } from 'socket.io-client';
 import { motion, AnimatePresence } from 'motion/react';
-import { Power, Wifi, WifiOff } from 'lucide-react';
-import Peer, { DataConnection } from 'peerjs';
+import { Power } from 'lucide-react';
 
 interface Instruction {
   id: string;
+  scenario_id: string;
   name: string;
-  media: ArrayBuffer | null;
+  media_url: string | null;
   media_type: string | null;
   bg_color: string;
 }
 
 interface Props {
+  socket: Socket | null;
   onBack: () => void;
 }
 
-export default function PatientDisplay({ onBack }: Props) {
+export default function PatientDisplay({ socket, onBack }: Props) {
   const [instruction, setInstruction] = useState<Instruction | null>(null);
   const [showControls, setShowControls] = useState(false);
-  const [peerId, setPeerId] = useState<string>('');
-  const [isConnected, setIsConnected] = useState(false);
-  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
-  
-  const peerRef = useRef<Peer | null>(null);
-  const connRef = useRef<DataConnection | null>(null);
 
   useEffect(() => {
-    // Generate a random 4-digit code
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const fullId = `radio-patient-${code}`;
-    setPeerId(code);
-
-    const peer = new Peer(fullId);
-    peerRef.current = peer;
-
-    peer.on('connection', (conn) => {
-      connRef.current = conn;
-      
-      conn.on('open', () => {
-        setIsConnected(true);
+    if (socket) {
+      socket.on('play_instruction', (data: Instruction) => {
+        setInstruction(data);
       });
 
-      conn.on('data', (data: any) => {
-        if (data.type === 'instruction') {
-          setInstruction(data.payload);
-        } else if (data.type === 'clear') {
-          setInstruction(null);
-        }
-      });
-
-      conn.on('close', () => {
-        setIsConnected(false);
+      socket.on('clear_instruction', () => {
         setInstruction(null);
       });
-    });
+    }
 
     return () => {
-      peer.destroy();
+      if (socket) {
+        socket.off('play_instruction');
+        socket.off('clear_instruction');
+      }
     };
-  }, []);
-
-  // Handle media URL creation
-  useEffect(() => {
-    if (instruction?.media) {
-      const blob = new Blob([instruction.media], { type: instruction.media_type || 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      setMediaUrl(url);
-      return () => URL.revokeObjectURL(url);
-    } else {
-      setMediaUrl(null);
-    }
-  }, [instruction]);
+  }, [socket]);
 
   // Hide controls after 3 seconds of inactivity
   useEffect(() => {
@@ -100,12 +68,8 @@ export default function PatientDisplay({ onBack }: Props) {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="absolute top-0 left-0 right-0 p-6 z-50 flex justify-between items-start"
+            className="absolute top-0 left-0 right-0 p-6 z-50 flex justify-end"
           >
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium backdrop-blur-md ${isConnected ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-              {isConnected ? <Wifi size={16} /> : <WifiOff size={16} />}
-              {isConnected ? 'Connecté à la console' : 'En attente de connexion...'}
-            </div>
             <button 
               onClick={onBack}
               className="p-4 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white transition-colors"
@@ -126,16 +90,16 @@ export default function PatientDisplay({ onBack }: Props) {
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
             className="flex-1 flex flex-col items-center justify-center p-12 bg-slate-900"
           >
-            {mediaUrl && (
+            {instruction.media_url && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3, duration: 0.8 }}
                 className="mb-12 max-w-4xl w-full aspect-video rounded-3xl overflow-hidden shadow-2xl bg-black/40 backdrop-blur-sm border border-white/10"
               >
-                {instruction.media_type?.startsWith('video/') ? (
+                {instruction.media_type === 'video' ? (
                   <video 
-                    src={mediaUrl} 
+                    src={instruction.media_url} 
                     autoPlay 
                     loop 
                     muted 
@@ -144,7 +108,7 @@ export default function PatientDisplay({ onBack }: Props) {
                   />
                 ) : (
                   <img 
-                    src={mediaUrl} 
+                    src={instruction.media_url} 
                     alt={instruction.name}
                     className="w-full h-full object-contain"
                   />
@@ -153,7 +117,7 @@ export default function PatientDisplay({ onBack }: Props) {
             )}
             
             {/* Only show name if it's not just a number, or if there's no media */}
-            {(!mediaUrl || isNaN(Number(instruction.name))) && (
+            {(!instruction.media_url || isNaN(Number(instruction.name))) && (
               <motion.h1 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -164,7 +128,7 @@ export default function PatientDisplay({ onBack }: Props) {
               </motion.h1>
             )}
             
-            {!mediaUrl && (
+            {!instruction.media_url && (
               <motion.div 
                 animate={{ 
                   scale: [1, 1.1, 1],
@@ -190,28 +154,14 @@ export default function PatientDisplay({ onBack }: Props) {
             transition={{ duration: 1 }}
             className="flex-1 flex flex-col items-center justify-center p-12 bg-slate-900"
           >
-            {!isConnected && (
-              <div className="absolute top-1/4 flex flex-col items-center">
-                <p className="text-slate-400 mb-4 uppercase tracking-widest text-sm font-semibold">Code de connexion</p>
-                <div className="text-7xl font-mono font-bold text-white tracking-widest bg-white/5 px-12 py-6 rounded-3xl border border-white/10">
-                  {peerId}
-                </div>
-                <p className="text-slate-500 mt-6 text-center max-w-md">
-                  Entrez ce code sur la console radiologue pour lier cet écran.
-                </p>
-              </div>
-            )}
-
             <motion.div 
               animate={{ opacity: [0.1, 0.3, 0.1] }}
               transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
               className="w-64 h-64 rounded-full bg-blue-500/10 blur-3xl absolute"
             />
-            {isConnected && (
-              <h1 className="text-4xl md:text-5xl font-light text-slate-500 text-center relative z-10">
-                Veuillez patienter pour les instructions
-              </h1>
-            )}
+            <h1 className="text-4xl md:text-5xl font-light text-slate-500 text-center relative z-10">
+              Veuillez patienter pour les instructions
+            </h1>
           </motion.div>
         )}
       </AnimatePresence>

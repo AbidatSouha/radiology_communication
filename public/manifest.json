@@ -1,7 +1,9 @@
 {
   "name": "Communication Radiologie",
   "short_name": "Radiologie",
+  "description": "Application d'affichage d'instructions radiologiques",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#0f172a",
